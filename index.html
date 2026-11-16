@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Book an Appointment</title>
+  <meta name="description" content="Book an appointment online." />
+  <style>
+    :root {
+      --bg: #0a1628;
+      --card: #11233f;
+      --line: #1f3a63;
+      --text: #e8eefb;
+      --muted: #94a7c7;
+      --accent: #4c8dff;
+      --accent-hover: #6aa1ff;
+      --danger: #ff6b7a;
+      --ok: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+    [v-cloak] { display: none; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+    header { text-align: center; padding: 24px 0 8px; }
+    h1 { font-size: 1.8rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); margin: 0; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+    h2 { font-size: 1.1rem; margin: 0 0 14px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 14px 0 6px; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      font: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    textarea { resize: vertical; min-height: 70px; }
+    .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+    .slot {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 0;
+      font: inherit;
+      cursor: pointer;
+    }
+    .slot:hover:not(:disabled) { border-color: var(--accent); }
+    .slot.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .slot:disabled { opacity: 0.35; cursor: not-allowed; text-decoration: line-through; }
+    .hint { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
+    button.primary {
+      width: 100%;
+      margin-top: 20px;
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      border-radius: 10px;
+      padding: 14px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary:hover { background: var(--accent-hover); }
+    .msg { padding: 12px; border-radius: 10px; margin-top: 16px; font-size: 0.95rem; }
+    .msg.error { background: rgba(255,107,122,0.12); color: var(--danger); border: 1px solid var(--danger); }
+    .msg.ok { background: rgba(74,222,128,0.12); color: var(--ok); border: 1px solid var(--ok); }
+    .booking {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      border-top: 1px solid var(--line);
+    }
+    .booking:first-of-type { border-top: 0; }
+    .booking small { color: var(--muted); display: block; }
+    button.cancel {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 28px; }
+  </style>
+</head>
+<body>
+  <div id="app" v-cloak class="wrap">
+    <header>
+      <!-- CHANGE THESE TWO LINES to your business name and tagline -->
+      <h1>{{ businessName }}</h1>
+      <p class="sub">{{ tagline }}</p>
+    </header>
+
+    <form class="card" @submit.prevent="submitBooking" novalidate>
+      <h2>Book an appointment</h2>
+
+      <label for="service">Service</label>
+      <select id="service" v-model="form.service">
+        <option value="" disabled>Choose a service</option>
+        <option v-for="s in services" :key="s.name" :value="s.name">
+          {{ s.name }} ({{ s.duration }})
+        </option>
+      </select>
+
+      <label for="date">Date</label>
+      <input id="date" type="date" v-model="form.date" :min="today" />
+
+      <label>Time</label>
+      <div class="slots">
+        <button
+          type="button"
+          v-for="t in timeSlots"
+          :key="t"
+          class="slot"
+          :class="{ active: form.time === t }"
+          :disabled="!form.date || isTaken(form.date, t)"
+          @click="form.time = t"
+        >{{ t }}</button>
+      </div>
+      <p class="hint" v-if="!form.date">Pick a date first to see times.</p>
+      <p class="hint" v-else>Crossed-out times are already booked.</p>
+
+      <label for="name">Your name</label>
+      <input id="name" type="text" v-model.trim="form.name" autocomplete="name" />
+
+      <label for="contact">Phone or email</label>
+      <input id="contact" type="text" v-model.trim="form.contact" autocomplete="email" />
+
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" v-model.trim="form.notes"></textarea>
+
+      <div class="msg error" v-if="error">{{ error }}</div>
+      <div class="msg ok" v-if="success">{{ success }}</div>
+
+      <button class="primary" type="submit">Confirm booking</button>
+    </form>
+
+    <section class="card" v-if="bookings.length">
+      <h2>Your bookings on this device</h2>
+      <div class="booking" v-for="b in sortedBookings" :key="b.id">
+        <div>
+          <strong>{{ b.service }}</strong>
+          <small>{{ prettyDate(b.date) }} at {{ b.time }} &middot; {{ b.name }}</small>
+        </div>
+        <button class="cancel" @click="cancelBooking(b.id)">Cancel</button>
+      </div>
+    </section>
+
+    <footer>
+      Demo site. Bookings are saved only in this browser, on this device.
+    </footer>
+  </div>
+
+  <!-- Vue 3, loaded from a public CDN (no install needed) -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp, ref, reactive, computed, watch } = Vue;
+    const STORAGE_KEY = "booking-page-v1";
+
+    createApp({
+      setup() {
+        // ---- Edit these to match your business ----
+        const businessName = "Planeplane";
+        const tagline = "hire me pls (jk)";
+        const services = [
+          { name: "Consultation", duration: "30 min" },
+          { name: "Standard Session", duration: "60 min" },
+          { name: "Extended Session", duration: "90 min" },
+        ];
+        const timeSlots = [
+          "09:00", "10:00", "11:00", "12:00",
+          "13:00", "14:00", "15:00", "16:00", "17:00",
+        ];
+        // --------------------------------------------
+
+        const load = () => {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const data = raw ? JSON.parse(raw) : [];
+            return Array.isArray(data) ? data : [];
+          } catch (e) {
+            return [];
+          }
+        };
+
+        const bookings = ref(load());
+        watch(bookings, (val) => {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
+          } catch (e) { /* storage blocked: ignore */ }
+        }, { deep: true });
+
+        const pad = (n) => String(n).padStart(2, "0");
+        const d = new Date();
+        const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+        const blank = () => ({ service: "", date: "", time: "", name: "", contact: "", notes: "" });
+        const form = reactive(blank());
+        const error = ref("");
+        const success = ref("");
+
+        const isTaken = (date, time) =>
+          bookings.value.some((b) => b.date === date && b.time === time);
+
+        // If the chosen date changes and the picked time is taken, clear it
+        watch(() => form.date, () => {
+          if (form.time && isTaken(form.date, form.time)) form.time = "";
+        });
+
+        const sortedBookings = computed(() =>
+          [...bookings.value].sort((a, b) =>
+            (a.date + a.time).localeCompare(b.date + b.time))
+        );
+
+        const prettyDate = (iso) => {
+          const [y, m, day] = iso.split("-").map(Number);
+          return new Date(y, m - 1, day).toLocaleDateString(undefined, {
+            weekday: "short", day: "numeric", month: "short", year: "numeric",
+          });
+        };
+
+        const submitBooking = () => {
+          error.value = "";
+          success.value = "";
+          if (!form.service) return (error.value = "Please choose a service.");
+          if (!form.date) return (error.value = "Please pick a date.");
+          if (form.date < today) return (error.value = "Please pick today or a future date.");
+          if (!form.time) return (error.value = "Please pick a time.");
+          if (!form.name) return (error.value = "Please enter your name.");
+          if (!form.contact) return (error.value = "Please enter a phone number or email.");
+          if (isTaken(form.date, form.time)) return (error.value = "Sorry, that time was just booked.");
+
+          bookings.value.push({ id: Date.now(), ...form });
+          success.value = `Booked! ${form.service} on ${prettyDate(form.date)} at ${form.time}.`;
+          Object.assign(form, blank());
+        };
+
+        const cancelBooking = (id) => {
+          bookings.value = bookings.value.filter((b) => b.id !== id);
+        };
+
+        return {
+          businessName, tagline, services, timeSlots, today,
+          form, error, success, bookings, sortedBookings,
+          isTaken, prettyDate, submitBooking, cancelBooking,
+        };
+      },
+    }).mount("#app");
+  </script>
+</body>
+</html>
