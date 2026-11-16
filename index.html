@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Book an Appointment</title>
-  <meta name="description" content="Book an appointment online." />
+  <title>Request a Booking</title>
+  <meta name="description" content="Request an appointment online." />
   <style>
     :root {
       --bg: #0a1628;
@@ -63,9 +63,8 @@
       font: inherit;
       cursor: pointer;
     }
-    .slot:hover:not(:disabled) { border-color: var(--accent); }
+    .slot:hover { border-color: var(--accent); }
     .slot.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .slot:disabled { opacity: 0.35; cursor: not-allowed; text-decoration: line-through; }
     .hint { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
     button.primary {
       width: 100%;
@@ -79,43 +78,33 @@
       font-weight: 600;
       cursor: pointer;
     }
-    button.primary:hover { background: var(--accent-hover); }
+    button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+    button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
     .msg { padding: 12px; border-radius: 10px; margin-top: 16px; font-size: 0.95rem; }
     .msg.error { background: rgba(255,107,122,0.12); color: var(--danger); border: 1px solid var(--danger); }
     .msg.ok { background: rgba(74,222,128,0.12); color: var(--ok); border: 1px solid var(--ok); }
-    .booking {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 0;
-      border-top: 1px solid var(--line);
-    }
+    .booking { padding: 12px 0; border-top: 1px solid var(--line); }
     .booking:first-of-type { border-top: 0; }
     .booking small { color: var(--muted); display: block; }
-    button.cancel {
-      background: transparent;
-      color: var(--danger);
-      border: 1px solid var(--danger);
-      border-radius: 8px;
-      padding: 6px 12px;
-      font: inherit;
-      cursor: pointer;
-      white-space: nowrap;
+    button.link {
+      background: none; border: 0; color: var(--muted); font: inherit;
+      text-decoration: underline; cursor: pointer; padding: 0; margin-top: 8px;
     }
+    /* Honeypot field: hidden from real people, bots tend to fill it in */
+    .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
     footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 28px; }
   </style>
 </head>
 <body>
   <div id="app" v-cloak class="wrap">
     <header>
-      <!-- CHANGE THESE TWO LINES to your business name and tagline -->
+      <!-- Business name and tagline are set in the script below -->
       <h1>{{ businessName }}</h1>
       <p class="sub">{{ tagline }}</p>
     </header>
 
-    <form class="card" @submit.prevent="submitBooking" novalidate>
-      <h2>Book an appointment</h2>
+    <form class="card" @submit.prevent="submitRequest" novalidate>
+      <h2>Request a booking</h2>
 
       <label for="service">Service</label>
       <select id="service" v-model="form.service">
@@ -125,10 +114,10 @@
         </option>
       </select>
 
-      <label for="date">Date</label>
-      <input id="date" type="date" v-model="form.date" :min="today" />
+      <label for="date">Preferred date</label>
+      <input id="date" type="date" v-model="form.date" :min="today" :max="maxDate" />
 
-      <label>Time</label>
+      <label>Preferred time</label>
       <div class="slots">
         <button
           type="button"
@@ -136,136 +125,205 @@
           :key="t"
           class="slot"
           :class="{ active: form.time === t }"
-          :disabled="!form.date || isTaken(form.date, t)"
           @click="form.time = t"
         >{{ t }}</button>
       </div>
-      <p class="hint" v-if="!form.date">Pick a date first to see times.</p>
-      <p class="hint" v-else>Crossed-out times are already booked.</p>
+      <p class="hint">We'll contact you to confirm your slot.</p>
 
       <label for="name">Your name</label>
-      <input id="name" type="text" v-model.trim="form.name" autocomplete="name" />
+      <input id="name" type="text" v-model.trim="form.name" maxlength="60" autocomplete="name" />
 
-      <label for="contact">Phone or email</label>
-      <input id="contact" type="text" v-model.trim="form.contact" autocomplete="email" />
+      <label for="contact">Phone number or email</label>
+      <input id="contact" type="text" v-model.trim="form.contact" maxlength="80" autocomplete="off" />
 
       <label for="notes">Notes (optional)</label>
-      <textarea id="notes" v-model.trim="form.notes"></textarea>
+      <textarea id="notes" v-model.trim="form.notes" maxlength="500"></textarea>
+
+      <!-- Honeypot: leave empty. Real visitors never see this. -->
+      <div class="hp" aria-hidden="true">
+        <label>Leave this empty
+          <input type="text" v-model="form.trap" tabindex="-1" autocomplete="off" />
+        </label>
+      </div>
 
       <div class="msg error" v-if="error">{{ error }}</div>
       <div class="msg ok" v-if="success">{{ success }}</div>
 
-      <button class="primary" type="submit">Confirm booking</button>
+      <button class="primary" type="submit" :disabled="sending || cooldown > 0">
+        {{ sending ? "Sending..." : cooldown > 0 ? `Please wait ${cooldown}s` : "Send request" }}
+      </button>
+      <p class="hint">By sending, you agree we may use your details only to contact you about this booking.</p>
     </form>
 
-    <section class="card" v-if="bookings.length">
-      <h2>Your bookings on this device</h2>
-      <div class="booking" v-for="b in sortedBookings" :key="b.id">
-        <div>
-          <strong>{{ b.service }}</strong>
-          <small>{{ prettyDate(b.date) }} at {{ b.time }} &middot; {{ b.name }}</small>
-        </div>
-        <button class="cancel" @click="cancelBooking(b.id)">Cancel</button>
+    <section class="card" v-if="history.length">
+      <h2>Requests sent from this device</h2>
+      <div class="booking" v-for="b in history" :key="b.id">
+        <strong>{{ b.service }}</strong>
+        <small>{{ prettyDate(b.date) }} at {{ b.time }} &middot; {{ b.name }}</small>
       </div>
+      <button class="link" @click="clearHistory">Clear this list</button>
     </section>
 
     <footer>
-      Demo site. Bookings are saved only in this browser, on this device.
+      Your request is sent to the business by email. The list above is stored only in this browser.
     </footer>
   </div>
 
   <!-- Vue 3, loaded from a public CDN (no install needed) -->
   <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
   <script>
-    const { createApp, ref, reactive, computed, watch } = Vue;
-    const STORAGE_KEY = "booking-page-v1";
+    const { createApp, ref, reactive, onMounted } = Vue;
+
+    // ---- Edit these to match your business ----
+    const BUSINESS_NAME = "Planeplane";
+    const TAGLINE = "Quick and easy online booking";
+    const SERVICES = [
+      { name: "Consultation", duration: "30 min" },
+      { name: "Standard Session", duration: "60 min" },
+      { name: "Extended Session", duration: "90 min" },
+    ];
+    const TIME_SLOTS = [
+      "09:00", "10:00", "11:00", "12:00",
+      "13:00", "14:00", "15:00", "16:00", "17:00",
+    ];
+    // Your Formspree address (it is safe for this to be public)
+    const FORM_ENDPOINT = "https://formspree.io/f/mnpdplwp";
+    // -------------------------------------------
+
+    const HISTORY_KEY = "booking-requests-v2";
+    const LAST_SENT_KEY = "booking-last-sent-v2";
+    const COOLDOWN_SECONDS = 60;
 
     createApp({
       setup() {
-        // ---- Edit these to match your business ----
-        const businessName = "Planeplane";
-        const tagline = "hire me pls (jk)";
-        const services = [
-          { name: "Consultation", duration: "30 min" },
-          { name: "Standard Session", duration: "60 min" },
-          { name: "Extended Session", duration: "90 min" },
-        ];
-        const timeSlots = [
-          "09:00", "10:00", "11:00", "12:00",
-          "13:00", "14:00", "15:00", "16:00", "17:00",
-        ];
-        // --------------------------------------------
+        const pad = (n) => String(n).padStart(2, "0");
+        const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const now = new Date();
+        const today = fmt(now);
+        const maxDate = fmt(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
 
-        const load = () => {
+        const readStore = (key, fallback) => {
           try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            const data = raw ? JSON.parse(raw) : [];
-            return Array.isArray(data) ? data : [];
-          } catch (e) {
-            return [];
-          }
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+          } catch (e) { return fallback; }
+        };
+        const writeStore = (key, val) => {
+          try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* ignore */ }
         };
 
-        const bookings = ref(load());
-        watch(bookings, (val) => {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
-          } catch (e) { /* storage blocked: ignore */ }
-        }, { deep: true });
-
-        const pad = (n) => String(n).padStart(2, "0");
-        const d = new Date();
-        const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-        const blank = () => ({ service: "", date: "", time: "", name: "", contact: "", notes: "" });
+        const history = ref(Array.isArray(readStore(HISTORY_KEY, [])) ? readStore(HISTORY_KEY, []) : []);
+        const blank = () => ({ service: "", date: "", time: "", name: "", contact: "", notes: "", trap: "" });
         const form = reactive(blank());
         const error = ref("");
         const success = ref("");
+        const sending = ref(false);
+        const cooldown = ref(0);
 
-        const isTaken = (date, time) =>
-          bookings.value.some((b) => b.date === date && b.time === time);
+        let timer = null;
+        const startCooldown = (secs) => {
+          cooldown.value = secs;
+          clearInterval(timer);
+          timer = setInterval(() => {
+            cooldown.value -= 1;
+            if (cooldown.value <= 0) clearInterval(timer);
+          }, 1000);
+        };
 
-        // If the chosen date changes and the picked time is taken, clear it
-        watch(() => form.date, () => {
-          if (form.time && isTaken(form.date, form.time)) form.time = "";
+        onMounted(() => {
+          const last = Number(readStore(LAST_SENT_KEY, 0)) || 0;
+          const left = COOLDOWN_SECONDS - Math.floor((Date.now() - last) / 1000);
+          if (left > 0) startCooldown(left);
         });
 
-        const sortedBookings = computed(() =>
-          [...bookings.value].sort((a, b) =>
-            (a.date + a.time).localeCompare(b.date + b.time))
-        );
-
         const prettyDate = (iso) => {
-          const [y, m, day] = iso.split("-").map(Number);
-          return new Date(y, m - 1, day).toLocaleDateString(undefined, {
+          const [y, m, d] = iso.split("-").map(Number);
+          return new Date(y, m - 1, d).toLocaleDateString(undefined, {
             weekday: "short", day: "numeric", month: "short", year: "numeric",
           });
         };
 
-        const submitBooking = () => {
-          error.value = "";
-          success.value = "";
-          if (!form.service) return (error.value = "Please choose a service.");
-          if (!form.date) return (error.value = "Please pick a date.");
-          if (form.date < today) return (error.value = "Please pick today or a future date.");
-          if (!form.time) return (error.value = "Please pick a time.");
-          if (!form.name) return (error.value = "Please enter your name.");
-          if (!form.contact) return (error.value = "Please enter a phone number or email.");
-          if (isTaken(form.date, form.time)) return (error.value = "Sorry, that time was just booked.");
+        // Rejects links and web addresses in free-text fields
+        const hasLink = (text) =>
+          /(https?:|www\.|ftp:|[a-z0-9-]+\.(com|net|org|info|biz|xyz|top|ru|cn|io|co|my|link|click|site|online)\b)/i.test(text);
+        const looksLikeEmail = (t) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+        const looksLikePhone = (t) => /^\+?[\d\s\-()]{7,20}$/.test(t);
 
-          bookings.value.push({ id: Date.now(), ...form });
-          success.value = `Booked! ${form.service} on ${prettyDate(form.date)} at ${form.time}.`;
-          Object.assign(form, blank());
+        const validate = () => {
+          if (!form.service) return "Please choose a service.";
+          if (!SERVICES.some((s) => s.name === form.service)) return "Please choose a service from the list.";
+          if (!form.date) return "Please pick a date.";
+          if (form.date < today || form.date > maxDate) return "Please pick a date within the next 6 months.";
+          if (!TIME_SLOTS.includes(form.time)) return "Please pick a time.";
+          if (form.name.length < 2) return "Please enter your name.";
+          if (hasLink(form.name)) return "Please enter just your name (no links).";
+          if (!looksLikeEmail(form.contact) && !looksLikePhone(form.contact)) {
+            return "Please enter a valid phone number or email address.";
+          }
+          if (hasLink(form.notes)) return "Please remove links from the notes.";
+          return "";
         };
 
-        const cancelBooking = (id) => {
-          bookings.value = bookings.value.filter((b) => b.id !== id);
+        const submitRequest = async () => {
+          error.value = "";
+          success.value = "";
+          if (sending.value || cooldown.value > 0) return;
+
+          // Honeypot filled in = a bot. Pretend success and send nothing.
+          if (form.trap) {
+            success.value = "Thanks! Your request has been sent.";
+            return;
+          }
+
+          const problem = validate();
+          if (problem) { error.value = problem; return; }
+
+          sending.value = true;
+          const payload = {
+            _subject: `Booking request: ${form.service} on ${form.date} at ${form.time}`,
+            service: form.service,
+            date: form.date,
+            time: form.time,
+            name: form.name,
+            contact: form.contact,
+            notes: form.notes || "(none)",
+          };
+          if (looksLikeEmail(form.contact)) payload.email = form.contact; // lets you reply directly
+
+          try {
+            const res = await fetch(FORM_ENDPOINT, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error("bad response");
+
+            history.value = [
+              { id: Date.now(), service: form.service, date: form.date, time: form.time, name: form.name },
+              ...history.value,
+            ].slice(0, 5);
+            writeStore(HISTORY_KEY, history.value);
+            writeStore(LAST_SENT_KEY, Date.now());
+            startCooldown(COOLDOWN_SECONDS);
+
+            success.value = "Thanks! Your request has been sent. We'll contact you to confirm.";
+            Object.assign(form, blank());
+          } catch (e) {
+            error.value = "Sorry, something went wrong sending your request. Please try again in a moment.";
+          } finally {
+            sending.value = false;
+          }
+        };
+
+        const clearHistory = () => {
+          history.value = [];
+          writeStore(HISTORY_KEY, []);
         };
 
         return {
-          businessName, tagline, services, timeSlots, today,
-          form, error, success, bookings, sortedBookings,
-          isTaken, prettyDate, submitBooking, cancelBooking,
+          businessName: BUSINESS_NAME, tagline: TAGLINE, services: SERVICES, timeSlots: TIME_SLOTS,
+          today, maxDate, form, error, success, sending, cooldown, history,
+          prettyDate, submitRequest, clearHistory,
         };
       },
     }).mount("#app");
